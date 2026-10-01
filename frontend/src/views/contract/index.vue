@@ -38,15 +38,19 @@
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
-            <button
-              v-for="action in actions"
-              :key="action"
-              class="link"
-              type="button"
-              @click="runAction(action, row)"
-            >
-              {{ action }}
-            </button>
+            <template v-if="rowActions(row).length">
+              <button
+                v-for="action in rowActions(row)"
+                :key="action"
+                class="link"
+                type="button"
+                :disabled="busyKey === String(row.id) + ':' + action"
+                @click="runAction(action, row)"
+              >
+                {{ action }}
+              </button>
+            </template>
+            <span v-else class="muted-text">当前档位无可执行动作</span>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -67,7 +71,7 @@ import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
 
-type Row = Record<string, string | number | null>
+type Row = Record<string, string | number | null> & { allowed_actions?: string[] }
 
 const ENDPOINT = '/api/contract'
 const columns = ["合同编号", "签约单位", "维保范围", "合同金额", "签约日期", "到期日期", "是否续签", "合同状态"]
@@ -94,19 +98,31 @@ function openCreate() {
   errorMessage.value = '维保合同登记入口尚未接入审批流'
 }
 
+const busyKey = ref('')
+
+function rowActions(row: Row): string[] {
+  return row.allowed_actions?.length ? row.allowed_actions : actions
+}
+
 async function runAction(action: string, row: Row) {
   errorMessage.value = ''
+  busyKey.value = String(row.id) + ':' + action
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
       body: JSON.stringify({ action }),
     })
-    if (!response.ok) {
-      throw new Error('维保合同动作未生效，请稍后重试')
+    const payload = (await response.json().catch(() => null)) as
+      | { ok?: boolean; message?: string }
+      | null
+    if (!response.ok || payload?.ok === false) {
+      throw new Error(payload?.message || '动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '维保合同操作失败'
+    errorMessage.value = error instanceof Error ? error.message : '操作失败'
+  } finally {
+    busyKey.value = ''
   }
 }
 

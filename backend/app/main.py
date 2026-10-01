@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.engine import ROLE_LABELS, roles
 from app.routers import ROUTERS
 from app.store import store
 
@@ -36,3 +37,10 @@ def health() -> dict[str, object]:
 def overview() -> dict[str, object]:
     """运营概览：把各业务模块的待处理量汇总成看板卡片。"""
     return store.overview()
+
+
+@app.get("/api/roles")
+def list_roles() -> dict[str, object]:
+    """可切换的值班角色：前端发起动作时通过 X-Operator-Role 头带上。"""
+    return {"roles": roles(), "labels": ROLE_LABELS}
+

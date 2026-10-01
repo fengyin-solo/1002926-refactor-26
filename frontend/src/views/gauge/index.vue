@@ -38,15 +38,19 @@
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
-            <button
-              v-for="action in actions"
-              :key="action"
-              class="link"
-              type="button"
-              @click="runAction(action, row)"
-            >
-              {{ action }}
-            </button>
+            <template v-if="rowActions(row).length">
+              <button
+                v-for="action in rowActions(row)"
+                :key="action"
+                class="link"
+                type="button"
+                :disabled="busyKey === String(row.id) + ':' + action"
+                @click="runAction(action, row)"
+              >
+                {{ action }}
+              </button>
+            </template>
+            <span v-else class="muted-text">当前档位无可执行动作</span>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -67,7 +71,7 @@ import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
 
-type Row = Record<string, string | number | null>
+type Row = Record<string, string | number | null> & { allowed_actions?: string[] }
 
 const ENDPOINT = '/api/gauge'
 const columns = ["压力表编号", "所属设备", "量程范围", "精度等级", "检定日期", "下次检定日", "检定结论", "仪表状态"]
@@ -94,19 +98,31 @@ function openCreate() {
   errorMessage.value = '压力表登记入口尚未接入审批流'
 }
 
+const busyKey = ref('')
+
+function rowActions(row: Row): string[] {
+  return row.allowed_actions?.length ? row.allowed_actions : actions
+}
+
 async function runAction(action: string, row: Row) {
   errorMessage.value = ''
+  busyKey.value = String(row.id) + ':' + action
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
       body: JSON.stringify({ action }),
     })
-    if (!response.ok) {
-      throw new Error('压力表检定动作未生效，请稍后重试')
+    const payload = (await response.json().catch(() => null)) as
+      | { ok?: boolean; message?: string }
+      | null
+    if (!response.ok || payload?.ok === false) {
+      throw new Error(payload?.message || '动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '压力表检定操作失败'
+    errorMessage.value = error instanceof Error ? error.message : '操作失败'
+  } finally {
+    busyKey.value = ''
   }
 }
 

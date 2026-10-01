@@ -1,9 +1,13 @@
-"""使用登记接口：维护设备登记，覆盖办理登记、申请停用、申请注销等动作。"""
+"""使用登记接口：维护设备，覆盖办理登记、申请停用、申请注销等动作。
+
+可执行动作不在各页面各抄一份：列表与明细统一带出 allowed_actions，
+动作顺序、跨模块拦截、授权与重复提交都由统一动作引擎判定。
+"""
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 
 from app.schemas import ActionResult, EntryPayload, PageResult
 from app.services.register import RegisterService
@@ -12,8 +16,8 @@ router = APIRouter(prefix="/api/register", tags=["使用登记"])
 
 service = RegisterService()
 
-LIST_FIELDS = ["设备编号", "设备名称", "设备种类", "使用单位", "安装地点", "投用日期", "登记证号", "登记状态"]
-STATUSES = ["待登记", "已登记", "停用中", "已注销"]
+LIST_FIELDS = ['设备编号', '设备名称', '设备种类', '使用单位', '安装地点', '投用日期', '登记证号', '登记状态']
+STATUSES = ['待登记', '已登记', '停用中', '已注销']
 
 
 @router.get("", response_model=PageResult[dict])
@@ -22,44 +26,56 @@ def list_entries(
     status: str | None = Query(default=None, description="待登记、已登记、停用中、已注销"),
     page: int = 1,
     size: int = 20,
+    x_operator_role: str | None = Header(default=None, alias="X-Operator-Role"),
 ) -> PageResult[dict]:
-    """按设备编号与状态过滤使用登记列表；没有数据时返回空页，不报错。"""
+    """按设备编号与状态过滤使用登记列表；每条记录只返回当前可执行的动作。"""
     if size > 200:
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
-    items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
+    items, total = service.list_entries(
+        role=x_operator_role, keyword=keyword, status=status, page=page, size=size
+    )
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/export")
+def export_entries(
+    x_operator_role: str | None = Header(default=None, alias="X-Operator-Role"),
+) -> dict[str, Any]:
+    """导出使用登记清单：返回当前过滤条件下的全量数据，可执行动作与列表口径一致。"""
+    items, total = service.list_entries(role=x_operator_role, page=1, size=10000)
+    return {"module": "register", "total": total, "items": items}
+
 @router.get("/{entry_id}", response_model=dict)
-def get_entry(entry_id: int) -> dict:
-    """读取单条设备登记明细；不存在时给出可读的错误说明。"""
-    entry = service.get_entry(entry_id)
+def get_entry(
+    entry_id: int,
+    x_operator_role: str | None = Header(default=None, alias="X-Operator-Role"),
+) -> dict:
+    """读取单条设备明细；不存在时给出可读的错误说明。"""
+    entry = service.get_entry(entry_id, role=x_operator_role)
     if entry is None:
-        raise HTTPException(status_code=404, detail=f"设备登记 {entry_id} 不存在或已归档")
+        raise HTTPException(status_code=404, detail=f"设备 {entry_id} 不存在或已归档")
     return entry
 
 
 @router.post("", response_model=ActionResult)
 def create_entry(payload: EntryPayload) -> ActionResult:
-    """登记一条设备登记，缺字段时说明原因而不是静默丢弃。"""
+    """登记一条设备，缺字段时说明原因而不是静默丢弃。"""
     entry, missing = service.create_entry(payload.values)
     if missing:
         return ActionResult(ok=False, message=f"缺少必填字段：{'、'.join(missing)}")
-    return ActionResult(ok=True, message="设备登记已登记", entry=entry)
+    return ActionResult(ok=True, message="设备已登记", entry=entry)
 
 
 @router.post("/{entry_id}/actions", response_model=ActionResult)
-def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条设备登记执行办理登记、申请停用、申请注销；不允许的动作会被拦下并说明原因。"""
+def run_action(
+    entry_id: int,
+    payload: EntryPayload,
+    x_operator_role: str | None = Header(default=None, alias="X-Operator-Role"),
+) -> ActionResult:
+    """对单条设备执行办理登记、申请停用、申请注销；回退/跳级、越权、缺授权、重复提交都会被拦下并说明原因。"""
     action = str(payload.values.get("action") or "").strip()
-    entry, message = service.run_action(entry_id, action)
+    entry, message = service.run_action(entry_id, action, role=x_operator_role)
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
 
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出使用登记清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "register", "total": total, "items": items}
