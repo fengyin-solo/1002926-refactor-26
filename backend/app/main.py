@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routers import ROUTERS
 from app.store import store
+from app.workflow import all_meta
 
 app = FastAPI(title="特种设备安全管理平台", version="1.0.0")
 
@@ -36,3 +37,9 @@ def health() -> dict[str, object]:
 def overview() -> dict[str, object]:
     """运营概览：把各业务模块的待处理量汇总成看板卡片。"""
     return store.overview()
+
+
+@app.get("/api/workflows")
+def workflows() -> dict[str, object]:
+    """二十个模块的统一动作口径：状态序、动作档与所需角色，供跨页面对齐。"""
+    return all_meta()

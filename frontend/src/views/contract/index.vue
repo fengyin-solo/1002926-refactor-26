@@ -38,15 +38,12 @@
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
-            <button
-              v-for="action in actions"
-              :key="action"
-              class="link"
-              type="button"
-              @click="runAction(action, row)"
-            >
-              {{ action }}
-            </button>
+            <template v-for="action in rowActions(row)" :key="action">
+              <button class="link" type="button" @click="runAction(action, row)">
+                {{ action }}
+              </button>
+            </template>
+            <span v-if="!rowActions(row).length" class="muted">—</span>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -65,9 +62,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 
-import { request } from '@/api/client'
+import { request, submitAction } from '@/api/client'
 
-type Row = Record<string, string | number | null>
+type Row = Record<string, string | number | string[] | null>
 
 const ENDPOINT = '/api/contract'
 const columns = ["合同编号", "签约单位", "维保范围", "合同金额", "签约日期", "到期日期", "是否续签", "合同状态"]
@@ -80,6 +77,12 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+function rowActions(row: Row): string[] {
+  const allowed = row.allowedActions
+  // 服务层按当前状态+角色实时给出可执行动作；异常时退回本页静态动作表，不致空白。
+  return Array.isArray(allowed) ? (allowed as string[]) : actions
+}
 
 function resetFilters() {
   filters.value = {}
@@ -97,16 +100,11 @@ function openCreate() {
 async function runAction(action: string, row: Row) {
   errorMessage.value = ''
   try {
-    const response = await request(`${ENDPOINT}/${row.id}/actions`, {
-      method: 'POST',
-      body: JSON.stringify({ action }),
-    })
-    if (!response.ok) {
-      throw new Error('维保合同动作未生效，请稍后重试')
-    }
+    const result = await submitAction(ENDPOINT, row, action)
     await reload()
+    errorMessage.value = result.message
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '维保合同操作失败'
+    errorMessage.value = error instanceof Error ? error.message : '操作失败'
   }
 }
 

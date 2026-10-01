@@ -18,6 +18,7 @@ class PageResult(BaseModel, Generic[T]):
 class ActionResult(BaseModel):
     ok: bool
     message: str
+    code: str | None = None
     entry: dict[str, Any] | None = None
 
 

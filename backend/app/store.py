@@ -7,13 +7,34 @@ from __future__ import annotations
 from typing import Any
 
 from app.seed import SEED_ROWS
+from app.workflow import SPEC_BY_KEY
 
 
 class Store:
     def __init__(self) -> None:
         self._tables: dict[str, list[dict[str, Any]]] = {
-            name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
+            name: [self._normalize(name, dict(row)) for row in rows]
+            for name, rows in SEED_ROWS.items()
         }
+
+    @staticmethod
+    def _normalize(module: str, row: dict[str, Any]) -> dict[str, Any]:
+        """补齐动作账本字段，并按统一状态机口径校正 pending/abnormal。
+
+        示例数据里这两个标志是随手填的，这里统一以状态序为准，避免看板与动作判定不一致。
+        """
+        spec = SPEC_BY_KEY.get(module)
+        status = row.get("status")
+        if spec is not None and status in spec.statuses:
+            index = spec.statuses.index(status)  # type: ignore[arg-type]
+            row["pending"] = status != spec.terminal_status
+            row["abnormal"] = index == 1
+            # 初始就处于第 N 档的示例数据，视为前 N 个动作均已完成，保持状态与账本一致，
+            # 否则列表会放行当前动作、提交时却因缺少前序记录而被误判为跳档。
+            row["_performed"] = list(spec.actions[:index])
+        else:
+            row.setdefault("_performed", [])
+        return row
 
     def module_names(self) -> list[str]:
         return sorted(self._tables)
